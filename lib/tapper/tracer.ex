@@ -20,7 +20,7 @@ defmodule Tapper.Tracer do
 
   require Logger
 
-  import Tapper.Tracer.Server, only: [via_tuple: 1]
+  import Tapper.Tracer.Server, only: [via_tuple: 1, via_tuple: 2]
 
   alias Tapper.Timestamp
   alias Tapper.Tracer.Trace
@@ -280,6 +280,46 @@ defmodule Tapper.Tracer do
     GenServer.cast(via_tuple(id), {:finish_span, id.span_id, timestamp, opts})
 
     Tapper.Id.pop(id)
+  end
+
+  @doc """
+  Ensure tracer has completed all pending operations for this trace.
+
+  Use before initiating an operation where you are going to need to use `pick_up/2` to
+  resume the trace, avoiding a race-condition between span registration and trace look-up.
+
+  > It's totally unnecessary to call this in any other situation.
+  """
+  def sync(id = %Tapper.Id{}) do
+    GenServer.call(via_tuple(id), {:sync, Timestamp.instant()})
+  end
+
+  @doc """
+  Pick-up the trace again from any span involved in the trace so far, returning a `Tapper.Id`.
+
+  This is provided for when a trace is sent to a remote server, with at minimum the trace id
+  and current span id, but the reply comes back asynchronously, and is handled by another process,
+  but is sent with same trace headers.
+
+  If the trace hasn't already timed out, a `Tapper.Id` will be rebuilt from the trace data,
+  and will be useable for all API calls, exactly as if it had never been dropped. If the trace
+  cannot be found, i.e. it has timed out, or something went wrong, `:ignore` is returned, which
+  causes API calls to become no-ops.
+
+  Beware that trace and span closing semantics still apply: either the process that picks up
+  the trace needs to finish it, closing the span as appropriate, or the process casting the
+  trace away needs to finish it with the `async` option.
+  """
+  @spec pick_up(trace_id :: Tapper.TraceId.t, span_id :: Tapper.SpanId.t) :: Tapper.Id.t
+  def pick_up(trace_id, span_id) when is_integer(trace_id) and is_integer(span_id) do
+    Logger.debug(fn -> "Attempting to pick-up trace #{Tapper.TraceId.format(trace_id)},#{Tapper.SpanId.format(span_id)}" end)
+    try do
+      GenServer.call(via_tuple(trace_id, span_id), {:pick_up, span_id, Timestamp.instant()})
+    catch
+      :exit, _ ->
+        Logger.warn(fn -> "Failed to pick-up trace #{Tapper.TraceId.format(trace_id)},#{Tapper.SpanId.format(span_id)}" end)
+        :ignore
+    end
   end
 
   @doc "build an name-span action, suitable for passing to `annotations` option or `update_span/3`; see also `Tapper.name/1`."

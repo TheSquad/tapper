@@ -36,8 +36,13 @@ defmodule Tapper.Tracer.Server do
 
   @doc "locate the server via the `Tapper.Id`."
   def via_tuple(%Tapper.Id{trace_id: trace_id, init_span_id: init_span_id}), do: via_tuple(trace_id, init_span_id)
-  defp via_tuple(trace_id, span_id) do
+  def via_tuple(trace_id, span_id) do
     {:via, Registry, {Tapper.Tracers, {trace_id, span_id}}}
+  end
+
+  # register this proc under this span id as well as its init_span_id
+  defp register(trace_id, span_id) do
+    {:ok, _pid} = Registry.register(Tapper.Tracers, {trace_id, span_id}, nil)
   end
 
   @doc """
@@ -118,7 +123,7 @@ defmodule Tapper.Tracer.Server do
   end
 
   @doc "via start_span/1"
-  def handle_cast(msg = {:start_span, span_info, opts}, trace) do
+  def handle_cast(msg = {:start_span, span_info = %Trace.SpanInfo{}, opts}, trace) do
     Logger.debug(fn -> inspect({Tapper.TraceId.format(trace.trace_id), msg}) end)
 
     config_endpoint = Trace.endpoint_from_config(trace.config)
@@ -136,6 +141,10 @@ defmodule Tapper.Tracer.Server do
     trace = put_in(trace.spans[span_info.id], span_info)
     trace = put_in(trace.last_activity, span_info.start_timestamp)
     trace = apply_updates(trace, opts[:annotations], span_info.id, span_info.start_timestamp, config_endpoint)
+
+    # register Tracer under the new span_id so we can pick_up() from external trace ids
+    Logger.info("Registering #{Tapper.TraceId.format(trace.trace_id)}, #{Tapper.SpanId.format(trace.span_id)}")
+    register(trace.trace_id, span_info.id)
 
     {:noreply, trace, trace.ttl}
   end
@@ -162,6 +171,22 @@ defmodule Tapper.Tracer.Server do
     trace = %Trace{trace | last_activity: timestamp}
 
     {:noreply, trace, trace.ttl}
+  end
+
+  def handle_call({:sync, timestamp}, _from, trace) do
+    trace = %Trace{trace | last_activity: timestamp}
+    {:reply, :ok, trace, trace.ttl}
+  end
+
+  @doc "via Tapper.Tracer.pickup(2)"
+  def handle_call(msg = {:pick_up, span_id, timestamp}, _from, trace) do
+    Logger.debug(fn -> inspect({trace.trace_id, msg}) end)
+
+    tapper_id = reform_tapper_id(trace, span_id)
+
+    trace = %Trace{trace | last_activity: timestamp}
+
+    {:reply, tapper_id, trace, trace.ttl}
   end
 
   @doc """
@@ -301,6 +326,21 @@ defmodule Tapper.Tracer.Server do
 
       _else -> annotations
     end
+  end
+
+  @doc false
+  # rebuild Tapper.Id from trace and span id
+  def reform_tapper_id(trace, span_id) do
+    %Tapper.Id{
+      trace_id: trace.trace_id,
+      init_span_id: trace.span_id,
+      init_parent_id: trace.parent_id,
+      sample: trace.sample,
+      debug: trace.debug,
+      span_id: span_id,
+      parent_ids: Trace.parents_of(trace, span_id),
+      sampled: true
+    }
   end
 
   @doc "convert trace to protocol spans, and invoke reporter module or function."

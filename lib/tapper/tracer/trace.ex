@@ -157,4 +157,19 @@ defmodule Tapper.Tracer.Trace do
     Enum.any?(annotations, fn(annotation) -> annotation.value === value end)
   end
 
+  @doc false
+  def parents_of(trace = %__MODULE__{}, span_id) when is_integer(span_id) do
+    span = trace.spans[span_id]
+    Enum.reverse(parents_of(trace, span, []))
+  end
+
+  defp parents_of(_trace, %__MODULE__.SpanInfo{parent_id: :root}, parent_ids) do
+    parent_ids
+  end
+  defp parents_of(trace, %__MODULE__.SpanInfo{parent_id: parent_id}, parent_ids) do
+    parent_span = trace.spans[parent_id]
+    parents_of(trace, parent_span, [parent_id | parent_ids])
+  end
+
+
 end

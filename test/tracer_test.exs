@@ -85,4 +85,36 @@ defmodule TracerTest do
     assert :ignore == Tracer.update_span(:ignore, [Tracer.name_delta("name")])
   end
 
+  test "pick_up from destructured id when tracer proc exists, returns id we can finish with" do
+      {ref, reporter} = msg_reporter()
+
+      id1 = Tracer.start(debug: true, name: "main-span", reporter: reporter, ttl: 500)
+      id2 = Tracer.start_span(id1, name: "cast-span", annotations: [:cs])
+
+      {trace_id_hex, span_id_hex, _parent_span_id, _sample, _debug} = Tapper.Id.destructure(id2)
+
+      Tracer.sync(id2) # important since we are racing span registration otherwise.
+
+      spawn(fn ->
+        {:ok, trace_id} = Tapper.TraceId.parse(trace_id_hex)
+        {:ok, span_id} = Tapper.SpanId.parse(span_id_hex)
+
+        pick_up_id = Tracer.pick_up(trace_id, span_id)
+        Tracer.finish_span(pick_up_id, annotations: :cr)
+      end)
+
+      Tracer.finish(id1, async: true)
+
+      assert_receive {^ref, spans}, 1000
+
+      cast_span = span_by_name(spans, "cast-span")
+
+      assert %Tapper.Protocol.Span{} = cast_span, "Expecting to find cast-span in reported spans"
+      assert Test.Helper.Protocol.protocol_annotation_by_value(cast_span, :cr), "Expecting to find :cr annotation on cast-span"
+  end
+
+  test "pick_up from destructured id when no tracer proc, returns :ignore" do
+     assert :ignore == Tracer.pick_up(Tapper.TraceId.generate(), Tapper.SpanId.generate())
+  end
+
 end

@@ -167,6 +167,33 @@ defmodule Tracer.Server.SpanTest do
     assert binary_annotations == []
   end
 
+  test "pick_up span results in usable looking tapper id" do
+
+    {_ref, reporter} = msg_reporter()
+    config = put_in(config()[:reporter], reporter)
+
+    ttl = 1000
+
+    {trace, span_id} = init_with_opts(config: config, ttl: 1000)
+
+    # add a child span to simulate one running async
+    timestamp = Timestamp.instant()
+
+    child_span = child_span_info("child", Tapper.SpanId.generate(), span_id, timestamp)
+    {:noreply, state, ^ttl} = Tapper.Tracer.Server.handle_cast({:start_span, child_span, []}, trace)
+
+
+    {:reply, tapper_id, state, ^ttl} = Tapper.Tracer.Server.handle_call({:pick_up, child_span.id, Timestamp.instant()}, self(), state)
+
+    assert tapper_id.trace_id == state.trace_id
+    assert tapper_id.init_span_id == state.span_id
+    assert tapper_id.init_parent_id == state.parent_id
+    assert tapper_id.span_id == child_span.id
+    assert tapper_id.parent_ids == [state.span_id]
+    assert tapper_id.sampled == true
+    assert tapper_id.sampled == true
+    assert tapper_id.debug == false
+  end
 
   def child_span_info(name, child_span_id, parent_id, timestamp) do
     %Tapper.Tracer.Trace.SpanInfo{

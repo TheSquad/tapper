@@ -12,7 +12,7 @@ defmodule Tapper.Id do
   defstruct [
     trace_id: nil,
     init_span_id: nil,       # span id from incoming trace, or initial span from locally created trace (primary ref with trace_id)
-    init_parent_id:   :root, # parent span id from incoming trace, or :root from locally created trace
+    init_parent_id: :root,   # parent span id from incoming trace, or :root from locally created trace
     sample: false,           # incoming trace sampled flag, or sample decision
     debug: false,            # incoming trace debug flag, or debug option
     sampled: false,          # i.e. sample || debug
