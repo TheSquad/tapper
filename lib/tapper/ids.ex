@@ -11,30 +11,41 @@ defmodule Tapper.Id do
 
   defstruct [
     trace_id: nil,
-    span_id: nil,
-    origin_parent_id: :root, # root span from incoming trace, or :root
-    parent_ids: [],          # stack of child spans
+    init_span_id: nil,       # span id from incoming trace, or initial span from locally created trace (primary ref with trace_id)
+    init_parent_id:   :root, # parent span id from incoming trace, or :root from locally created trace
     sample: false,           # incoming trace sampled flag, or sample decision
     debug: false,            # incoming trace debug flag, or debug option
-    sampled: false           # i.e. sample || debug
+    sampled: false,          # i.e. sample || debug
+    span_id: nil,            # current span id
+    parent_ids: [],          # stack of prior child span ids
   ]
 
   alias Tapper.TraceId
   alias Tapper.SpanId
 
   @typedoc false
-  @type t :: %__MODULE__{trace_id: Tapper.TraceId.t, span_id: Tapper.SpanId.t, parent_ids: [Tapper.SpanId.t], sampled: boolean(), origin_parent_id: Tapper.SpanId.t | :root, sample: boolean(), debug: boolean()} | :ignore
+  @type t :: %__MODULE__{
+    trace_id: Tapper.TraceId.t,
+    init_span_id: Tapper.SpanId.t,
+    init_parent_id: Tapper.SpanId.t | :root,
+    sample: boolean(),
+    debug: boolean(),
+    sampled: boolean(),
+    span_id: Tapper.SpanId.t,
+    parent_ids: [Tapper.SpanId.t]
+  } | :ignore
 
   @doc "Create id from trace context"
   @spec init(trace_id :: TraceId.t, span_id :: SpanId.t, parent_span_id :: SpanId.t, sample :: boolean, debug :: boolean) :: t
   def init(trace_id, span_id, parent_span_id, sample, debug) do
     %Tapper.Id{
       trace_id: trace_id,
-      span_id: span_id,
-      origin_parent_id: parent_span_id,
-      parent_ids: [],
+      init_span_id: span_id,
+      init_parent_id: parent_span_id,
       sample: sample,
       debug: debug,
+      span_id: span_id,
+      parent_ids: [],
       sampled: sample || debug
     }
   end
@@ -68,23 +79,27 @@ defmodule Tapper.Id do
   ```
   """
   @spec destructure(Tapper.Id.t) :: {String.t, String.t, String.t, boolean, boolean}
-  def destructure(%Tapper.Id{trace_id: trace_id, span_id: span_id, origin_parent_id: :root, parent_ids: [], sample: sample, debug: debug}) do
+  def destructure(%Tapper.Id{trace_id: trace_id, span_id: span_id, init_parent_id: :root, parent_ids: [], sample: sample, debug: debug}) do
     {TraceId.to_hex(trace_id), SpanId.to_hex(span_id), "", sample, debug}
   end
-  def destructure(%Tapper.Id{trace_id: trace_id, span_id: span_id, origin_parent_id: origin_parent_id, parent_ids: [], sample: sample, debug: debug}) do
-    {TraceId.to_hex(trace_id), SpanId.to_hex(span_id), SpanId.to_hex(origin_parent_id), sample, debug}
+  def destructure(%Tapper.Id{trace_id: trace_id, span_id: span_id, init_parent_id: init_parent_id, parent_ids: [], sample: sample, debug: debug}) do
+    {TraceId.to_hex(trace_id), SpanId.to_hex(span_id), SpanId.to_hex(init_parent_id), sample, debug}
   end
-  def destructure(%Tapper.Id{trace_id: trace_id, span_id: span_id, origin_parent_id: _origin_parent_id, parent_ids: [parent_id | _rest], sample: sample, debug: debug}) do
+  def destructure(%Tapper.Id{trace_id: trace_id, span_id: span_id, parent_ids: [parent_id | _rest], sample: sample, debug: debug}) do
     {TraceId.to_hex(trace_id), SpanId.to_hex(span_id), SpanId.to_hex(parent_id), sample, debug}
   end
 
   @doc "Generate a TraceId for testing; sample is true"
   def test_id(parent_span_id \\ :root) do
+    trace_id = Tapper.TraceId.generate()
+    span_id = Tapper.SpanId.generate()
+
     %Tapper.Id{
-      trace_id: Tapper.TraceId.generate(),
-      span_id: Tapper.SpanId.generate(),
+      trace_id: trace_id,
+      span_id: span_id,
       parent_ids: [],
-      origin_parent_id: parent_span_id,
+      init_parent_id: parent_span_id,
+      init_span_id: span_id,
       sample: true,
       debug: false,
       sampled: true
@@ -114,13 +129,11 @@ defmodule Tapper.TraceId do
   @moduledoc """
   Generate, parse or format a top-level trace id.
 
-  The TraceId comprises the 128-bit Zipkin id, with a second component which is generated using a
-  per-VM unique number sequence, to disambiguate parallel requests to the same server, so each request
-  gets it's own trace server, which prevents lifecycle confusion.
+  The TraceId comprises a 128-bit Zipkin id.
   """
   @type int128 :: integer()
 
-  @type t :: {int128, integer()}
+  @type t :: int128
 
   defstruct [:value]   # NB only used as wrapper for e.g. logging format
 
@@ -128,20 +141,20 @@ defmodule Tapper.TraceId do
   @spec generate() :: t
   def generate() do
     <<id :: size(128)>> = :crypto.strong_rand_bytes(16)
-    {id, uniq()}
+    id
   end
 
   @doc "format a trace id for logs etc."
   @spec format(trace_id :: t) :: String.t
   def format(trace_id)
-  def format({id, unique}) do
-    "#Tapper.TraceId<" <> Tapper.Id.Utils.to_hex(id) <> "." <> Integer.to_string(unique) <> ">"
+  def format(id) do
+    "#Tapper.TraceId<" <> Tapper.Id.Utils.to_hex(id) <> ">"
   end
 
   @doc "format a trace id to a hex string, for propagation etc."
   @spec to_hex(trace_id :: t) :: String.t
   def to_hex(trace_id)
-  def to_hex({id, _unique}) do
+  def to_hex(id) do
     Tapper.Id.Utils.to_hex(id)
   end
 
@@ -150,12 +163,10 @@ defmodule Tapper.TraceId do
   def parse(s) do
     case Integer.parse(s, 16) do
       :error -> :error
-      {integer, remaining} when byte_size(remaining) == 0 -> {:ok, {integer, uniq()}}
+      {integer, remaining} when byte_size(remaining) == 0 -> {:ok, integer}
       _ -> :error
     end
   end
-
-  defp uniq(), do: System.unique_integer([:monotonic, :positive])
 
   defimpl Inspect do
     import Inspect.Algebra

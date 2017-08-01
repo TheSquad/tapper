@@ -3,15 +3,14 @@ defmodule TraceIdTest do
   doctest Tapper.TraceId
 
   test "can generate id" do
-    {id, uniq} = Tapper.TraceId.generate()
+    id = Tapper.TraceId.generate()
     assert is_integer(id)
-    assert is_integer(uniq)
 
-    assert {id, uniq} != Tapper.TraceId.generate()
+    assert id != Tapper.TraceId.generate()
   end
 
   test "format" do
-    assert Tapper.TraceId.format({100,200}) == "#Tapper.TraceId<64.200>"
+    assert Tapper.TraceId.format(100) == "#Tapper.TraceId<64>"
   end
 
   test "parse" do
@@ -19,8 +18,7 @@ defmodule TraceIdTest do
       assert :error == Tapper.TraceId.parse("xxx")
       assert :error == Tapper.TraceId.parse("123x")
       assert :error == Tapper.TraceId.parse("x123")
-      assert {:ok, {291, u}} = Tapper.TraceId.parse("123")
-      assert is_integer(u)
+      assert {:ok, 291} = Tapper.TraceId.parse("123")
   end
 end
 
@@ -52,7 +50,7 @@ defmodule TapperIdTest do
   use ExUnit.Case
 
   describe "init/5" do
-    test "init with parent_span_id become origin_parent_id" do
+    test "init with parent_span_id become init_parent_id" do
       trace_id = Tapper.TraceId.generate()
       span_id = Tapper.SpanId.generate()
       parent_span_id = Tapper.SpanId.generate()
@@ -62,7 +60,8 @@ defmodule TapperIdTest do
       assert %Tapper.Id{
         trace_id: ^trace_id,
         span_id: ^span_id,
-        origin_parent_id: ^parent_span_id,
+        init_parent_id: ^parent_span_id,
+        init_span_id: ^span_id,
         sample: true,
         debug: false,
         sampled: true,
@@ -70,7 +69,7 @@ defmodule TapperIdTest do
       } = id
     end
 
-    test "init with :root becomes origin_parent_id" do
+    test "init with :root becomes init_parent_id" do
       trace_id = Tapper.TraceId.generate()
       span_id = Tapper.SpanId.generate()
       parent_span_id = :root
@@ -80,7 +79,8 @@ defmodule TapperIdTest do
       assert %Tapper.Id{
         trace_id: ^trace_id,
         span_id: ^span_id,
-        origin_parent_id: ^parent_span_id,
+        init_span_id: ^span_id,
+        init_parent_id: ^parent_span_id,
         sample: true,
         debug: false,
         sampled: true,
@@ -106,11 +106,11 @@ defmodule TapperIdTest do
 
   test "test_id/1" do
     id = Tapper.Id.test_id()
-    assert id.origin_parent_id == :root
+    assert id.init_parent_id == :root
 
     parent_span_id = Tapper.SpanId.generate()
     id = Tapper.Id.test_id(parent_span_id)
-    assert id.origin_parent_id == parent_span_id
+    assert id.init_parent_id == parent_span_id
   end
 
   describe "pop/1 and push/2" do
@@ -194,7 +194,7 @@ defmodule TapperIdTest do
       id = %Tapper.Id{
         trace_id: Tapper.TraceId.generate(),
         span_id: Tapper.SpanId.generate(),
-        origin_parent_id: Tapper.SpanId.generate(),
+        init_parent_id: Tapper.SpanId.generate(),
         parent_ids: [],
         sample: true,
         debug: false
@@ -204,14 +204,14 @@ defmodule TapperIdTest do
 
       assert trace_id == Tapper.TraceId.to_hex(id.trace_id)
       assert span_id == Tapper.SpanId.to_hex(id.span_id)
-      assert parent_span_id == Tapper.SpanId.to_hex(id.origin_parent_id)
+      assert parent_span_id == Tapper.SpanId.to_hex(id.init_parent_id)
     end
 
     test "destructure main span with root parent span" do
       id = %Tapper.Id{
         trace_id: Tapper.TraceId.generate(),
         span_id: Tapper.SpanId.generate(),
-        origin_parent_id: :root,
+        init_parent_id: :root,
         parent_ids: [],
         sample: true,
         debug: false
@@ -228,7 +228,7 @@ defmodule TapperIdTest do
       id = %Tapper.Id{
         trace_id: Tapper.TraceId.generate(),
         span_id: Tapper.SpanId.generate(),
-        origin_parent_id: :root,
+        init_parent_id: :root,
         parent_ids: [Tapper.SpanId.generate()],
         sample: true,
         debug: false
@@ -247,7 +247,7 @@ defmodule TapperIdTest do
           %Tapper.Id{
             trace_id: Tapper.TraceId.generate(),
             span_id: Tapper.SpanId.generate(),
-            origin_parent_id: :root,
+            init_parent_id: :root,
             parent_ids: [],
             sample: sample,
             debug: debug
@@ -270,17 +270,15 @@ defmodule TapperIdTest do
       sampled: true
     }
 
-    regex = ~r/#Tapper.Id<#Tapper.TraceId<(.+)\.(.+)>:#Tapper.SpanId<(.+)>,(.+)>/
+    regex = ~r/#Tapper.Id<#Tapper.TraceId<(.+)>:#Tapper.SpanId<(.+)>,(.+)>/
     assert Regex.match?(regex,inspect(id))
 
-    [_, trace_id, uniq, span_id, sampled] = Regex.run(regex, inspect(id))
+    [_, trace_id, span_id, sampled] = Regex.run(regex, inspect(id))
 
     {trace_id, ""} = Integer.parse(trace_id, 16)
-    {uniq, ""} = Integer.parse(uniq, 10)
     {span_id, ""} = Integer.parse(span_id, 16)
 
-    assert trace_id == elem(id.trace_id,0)
-    assert uniq == elem(id.trace_id,1)
+    assert trace_id == id.trace_id
     assert span_id == id.span_id
     assert sampled == "SAMPLED"
   end
@@ -295,20 +293,18 @@ defmodule TapperIdTest do
       debug: false
     }
 
-    regex = ~r/#Tapper.Id<#Tapper.TraceId<(.+)\.(.+)>:#Tapper.SpanId<(.+)>,(.+)>/
+    regex = ~r/#Tapper.Id<#Tapper.TraceId<(.+)>:#Tapper.SpanId<(.+)>,(.+)>/
 
     chars = to_string(id)
 
     assert Regex.match?(regex, chars)
 
-    [_, trace_id, uniq, span_id, sampled] = Regex.run(regex, chars)
+    [_, trace_id, span_id, sampled] = Regex.run(regex, chars)
 
     {trace_id, ""} = Integer.parse(trace_id, 16)
-    {uniq, ""} = Integer.parse(uniq, 10)
     {span_id, ""} = Integer.parse(span_id, 16)
 
-    assert trace_id == elem(id.trace_id,0)
-    assert uniq == elem(id.trace_id,1)
+    assert trace_id == id.trace_id
     assert span_id == id.span_id
     assert sampled == "SAMPLED"
   end

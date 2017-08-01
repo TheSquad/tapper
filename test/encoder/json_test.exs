@@ -2,7 +2,7 @@ defmodule JsonTest do
   use ExUnit.Case
 
   test "encode with parent_id, no annotations" do
-    {trace_id, _uniq} = Tapper.TraceId.generate()
+    trace_id = Tapper.TraceId.generate()
     span_id = Tapper.SpanId.generate()
     parent_span_id = Tapper.SpanId.generate()
 
@@ -48,7 +48,7 @@ defmodule JsonTest do
   end
 
   test "encode with annotations" do
-    {trace_id, _uniq} = Tapper.TraceId.generate()
+    trace_id = Tapper.TraceId.generate()
     span_id = Tapper.SpanId.generate()
     parent_span_id = Tapper.SpanId.generate()
 
@@ -139,7 +139,7 @@ defmodule JsonTest do
   end
 
   test "encode multiple spans" do
-    {trace_id, _uniq} = Tapper.TraceId.generate()
+    trace_id = Tapper.TraceId.generate()
     span_id_1 = Tapper.SpanId.generate()
     span_id_2 = Tapper.SpanId.generate()
 
@@ -170,7 +170,7 @@ defmodule JsonTest do
 
     assert [span_1, span_2] = json
 
-    assert span_1["traceId"] == Tapper.TraceId.to_hex({trace_id, 0})
+    assert span_1["traceId"] == Tapper.TraceId.to_hex(trace_id)
     assert span_1["traceId"] == span_2["traceId"]
     assert span_1["id"] == Tapper.SpanId.to_hex(span_id_1)
     assert span_2["id"] == Tapper.SpanId.to_hex(span_id_2)

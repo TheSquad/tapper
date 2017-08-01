@@ -15,14 +15,16 @@ defmodule TracerTest do
     assert state.span_id == id.span_id
     assert state.parent_id == :root
 
-    [{pid,_}] = Tracer.whereis(id.trace_id)
+    [{pid,_}] = Tracer.whereis(id.trace_id, id.init_span_id)
     assert Process.alive?(pid)
+
+    assert [{^pid, _}] = Tracer.whereis(id)
   end
 
   test "end root trace causes trace server to exit" do
       id = Tracer.start(debug: true)
 
-      [{pid,_}] = Tracer.whereis(id.trace_id)
+      [{pid,_}] = Tracer.whereis(id)
       ref = Process.monitor(pid)
 
       Tracer.finish(id)

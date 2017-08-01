@@ -138,8 +138,6 @@ If the API client starts spans in, or around, asynchronous processes, and exits 
 
 The API client is not effected by the termination, normally or otherwise, of a trace-server, and the trace-server is likewise isolated from the API client, i.e. there is a separate supervision tree. Thus if the API client crashes, then the span can still be reported. The trace-server monitors the API client process for abnormal termination, and annotates the trace with an error (TODO). If the trace-server crashes, any child spans and annotations registered with the server will be lost, but subsequent spans and the trace itself will be reported, since the supervisor will re-start the trace-server using the initial data from `Tapper.start/1` or `Tapper.join/6`.
 
-Trace ids have an additional, unique, identifier, so if a server receives parallel requests within the same client span, the traces are recorded separately: each will start their own trace-server.
-
 The id returned from the API simply tracks the trace id, enabling messages to be sent to the right server, and span nesting, to ensure annotations are added to the correct span.
 
 ## Installation

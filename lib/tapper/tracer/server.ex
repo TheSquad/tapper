@@ -28,16 +28,16 @@ defmodule Tapper.Tracer.Server do
   ## See also
   * `init/1`.
   """
-  def start_link(config, trace_init = {trace_id, _, _, _, _}, pid, timestamp, opts) do
+  def start_link(config, trace_init = {trace_id, span_id, _, _, _}, pid, timestamp, opts) do
     Logger.debug(fn -> inspect {"Tracer: start_link", trace_init} end)
 
-    GenServer.start_link(Tapper.Tracer.Server, [config, trace_init, pid, timestamp, opts], name: via_tuple(trace_id)) # calls Tapper.Tracer.Server.init/1
+    GenServer.start_link(Tapper.Tracer.Server, [config, trace_init, pid, timestamp, opts], name: via_tuple(trace_id, span_id)) # calls Tapper.Tracer.Server.init/1
   end
 
   @doc "locate the server via the `Tapper.Id`."
-  def via_tuple(%Tapper.Id{trace_id: trace_id}), do: via_tuple(trace_id)
-  def via_tuple(trace_id) do
-    {:via, Registry, {Tapper.Tracers, trace_id}}
+  def via_tuple(%Tapper.Id{trace_id: trace_id, init_span_id: init_span_id}), do: via_tuple(trace_id, init_span_id)
+  defp via_tuple(trace_id, span_id) do
+    {:via, Registry, {Tapper.Tracers, {trace_id, span_id}}}
   end
 
   @doc """

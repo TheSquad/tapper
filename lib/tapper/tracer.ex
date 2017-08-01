@@ -54,7 +54,7 @@ defmodule Tapper.Tracer do
   """
   def start(opts \\ []) when is_list(opts) do
     trace_id = Tapper.TraceId.generate()
-    span_id = elem(trace_id, 0) &&& 0xFFFFFFFFFFFFFFFF # lower 64 bits
+    span_id = trace_id &&& 0xFFFF_FFFF_FFFF_FFFF # lower 64 bits
     timestamp = Timestamp.instant()
 
     # check and default options
@@ -355,9 +355,9 @@ defmodule Tapper.Tracer do
 
   @doc false
   def whereis(:ignore), do: []
-  def whereis(%Tapper.Id{trace_id: trace_id}), do: whereis(trace_id)
-  def whereis(trace_id) do
-    Registry.lookup(Tapper.Tracers, trace_id)
+  def whereis(%Tapper.Id{trace_id: trace_id, init_span_id: init_span_id}), do: whereis(trace_id, init_span_id)
+  def whereis(trace_id, span_id) do
+    Registry.lookup(Tapper.Tracers, {trace_id, span_id})
   end
 
   @doc false
