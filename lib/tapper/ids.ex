@@ -126,8 +126,14 @@ defmodule Tapper.TraceId do
 
   @doc "generate a trace id"
   @spec generate() :: t
-  def generate() do
+  def generate(), do: generate(nil)
+
+  @spec generate(trace_id :: t) :: t
+  def generate(nil) do
     <<id :: size(128)>> = :crypto.strong_rand_bytes(16)
+    {id, uniq()}
+  end
+  def generate(id) do
     {id, uniq()}
   end
 

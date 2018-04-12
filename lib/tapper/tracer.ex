@@ -53,7 +53,8 @@ defmodule Tapper.Tracer do
 
   """
   def start(opts \\ []) when is_list(opts) do
-    trace_id = Tapper.TraceId.generate()
+    {trace_id, opts} = Keyword.get_and_update(opts, :trace_id, fn(_) -> :pop end)
+    trace_id = Tapper.TraceId.generate(trace_id)
     span_id = elem(trace_id, 0) &&& 0xFFFFFFFFFFFFFFFF # lower 64 bits
     timestamp = Timestamp.instant()
 
